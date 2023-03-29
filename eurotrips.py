@@ -1,6 +1,7 @@
 import requests
 import json
 from datetime import datetime, timedelta
+import itertools
 
 
 # This is a sample Python script.
@@ -27,8 +28,6 @@ def getFlight(departure, destination, dateFrom, dateTo):
     else:
         print(f"No flights")
         return None
-
-
 
 
 def sendTelegramMessage(message):
@@ -84,19 +83,19 @@ hotelIds = {
 
 }
 
-
 country_codes = {
-    "ES": ["BCN"],
-    "IT": ["ROM"],
+    "ES": ["BCN", "SVQ"],
+    "IT": ["ROM", "NAP"],
     "FR": ["PAR"],
     "DE": ["BER"],
     "GR": ["ATH"],
-    "PT": ["LIS"],
+    "PT": ["LIS", "OPO"],
     "GB": ["LON"],
     "NL": ["AMS"],
     "BE": ["BRU"],
     "CZ": ["PRG"]
 }
+
 
 def calculateCheapestRoute(departure, dateFrom, dateTo, countries, adults):
     url = f'https://tequila-api.kiwi.com/v2/nomad?adults={adults}&conn_on_diff_airport=0&sort=quality&limit=20&date_from={dateFrom.strftime("%d/%m/%Y")}&date_to={dateFrom.strftime("%d/%m/%Y")}&fly_from={departure}&fly_to={departure}&return_from={dateTo.strftime("%d/%m/%Y")}&return_to={dateTo.strftime("%d/%m/%Y")}'
@@ -104,7 +103,7 @@ def calculateCheapestRoute(departure, dateFrom, dateTo, countries, adults):
     via = []
     for country in countries:
         via.append({
-            "locations": country_codes[country],
+            "locations": [country],
             "nights_range": [
                 2,
                 3
@@ -121,6 +120,7 @@ def calculateCheapestRoute(departure, dateFrom, dateTo, countries, adults):
     }
 
     response = requests.request("POST", url, headers=headers, data=payload)
+    print(response)
 
     if len(response.json()['data']) > 0:
         cheapest_route = response.json()['data'][0]
@@ -165,24 +165,41 @@ def calculateHotelPricePerJump(dateFrom, dateTo, destination, adults):
         print(f"No hotels")
         return None
 
+
+def getCheapestRoute(departure, dateFrom, dateTo, countries, adults):
+
+    city_lists = [country_codes[country] for country in countries]
+    city_combinations = list(itertools.product(*city_lists))
+    cheapest_route = None
+    for combination in city_combinations:
+        route = calculateCheapestRoute(departure, dateFrom, dateTo, combination, adults)
+        if route is not None:
+            if cheapest_route is None:
+                cheapest_route = route
+            elif cheapest_route['price'] > route['price']:
+                cheapest_route = route
+    return cheapest_route
+
+
 if __name__ == '__main__':
-    departure = "MAD"
-    countries = ["PT","IT","DE","NL"]
-    dateFrom = datetime.strptime("01/06/2023", '%d/%m/%Y')
-    dateTo = datetime.strptime("15/06/2023", '%d/%m/%Y')
+    departure = "BCN"
+    countries = ["IT", "PT"]
+    dateFrom = datetime.strptime("17/07/2023", '%d/%m/%Y')
+    dateTo = datetime.strptime("23/07/2023", '%d/%m/%Y')
     adults = 2
 
-
-
+    cheapest_route = getCheapestRoute(departure, dateFrom, dateTo, countries, adults)
     cost_price = 0
-    route = calculateCheapestRoute(departure, dateFrom, dateTo, countries, adults) #TODO; comparar rutas y devolver la más barata
-    print("flights:", route['price'])
-    cost_price += route['price']
-    jumps = route['route']
-    for i in range(len(jumps)-1):
+    if cheapest_route is None:
+        print("No routes found")
+        exit(0)
+    print("flights:", cheapest_route['price'])
+    cost_price += cheapest_route['price']
+    jumps = cheapest_route['route']
+    for i in range(len(jumps) - 1):
         arrival_datetime = datetime.strptime(jumps[i]['local_arrival'], '%Y-%m-%dT%H:%M:%S.%fZ')
-        departure_datetime = datetime.strptime(jumps[i+1]['local_arrival'], '%Y-%m-%dT%H:%M:%S.%fZ')
-        destination= jumps[i]['cityCodeTo']
+        departure_datetime = datetime.strptime(jumps[i + 1]['local_arrival'], '%Y-%m-%dT%H:%M:%S.%fZ')
+        destination = jumps[i]['cityCodeTo']
         selected_hotel = calculateHotelPricePerJump(arrival_datetime, departure_datetime, destination, adults)
         print(destination)
         print(selected_hotel['price'])
@@ -191,9 +208,6 @@ if __name__ == '__main__':
         cost_price += selected_hotel['price']
 
     cost_price = cost_price / adults
-    print("Cost price (pp):" ,cost_price)
+    print("Cost price (pp):", cost_price)
     final_price = cost_price * 1.2
-    print("Final price (pp):" ,final_price)
-
-
-
+    print("Final price (pp):", final_price)
